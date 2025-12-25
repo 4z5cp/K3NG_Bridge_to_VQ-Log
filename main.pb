@@ -25,10 +25,16 @@ XIncludeFile "Windows.pbi"
 ; ============================================================================
 Procedure Main()
   Protected event.i, gadget.i, quit.i = #False
-  
+
+  ; Проверка единственного экземпляра
+  If Not CheckSingleInstance()
+    ; Приложение уже запущено - тихо выходим
+    ProcedureReturn
+  EndIf
+
   ; Загрузка конфигурации
   LoadConfig()
-  
+
   ; Создание главного окна
   CreateMainWindow()
 
@@ -95,7 +101,8 @@ Procedure Main()
   DisconnectK3NG()
   CleanupDDEServer()
   SaveConfig()
-  
+  ReleaseSingleInstance()
+
 EndProcedure
 
 ; === Точка входа ===

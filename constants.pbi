@@ -68,6 +68,9 @@ CompilerIf Not Defined(DDE_FACK, #PB_Constant)
   #DDE_FACK = $8000
 CompilerEndIf
 
+; === Windows Constants ===
+#ERROR_ALREADY_EXISTS = 183
+
 ; === Application Constants ===
 #APP_NAME = "K3NG Bridge for VQ-Log"
 #APP_VERSION = "1.0"

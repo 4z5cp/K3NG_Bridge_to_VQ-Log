@@ -26,6 +26,7 @@ Global TCPConnection.i = 0
 Global CurrentAzimuth.i = 0
 Global CurrentElevation.i = 0
 Global TargetAzimuth.i = -1
+Global Mutex.i = 0
 
 ; === Procedure Declarations ===
 Declare LogMsg(msg.s)
@@ -50,8 +51,10 @@ Declare HandleStopButton()
 Declare HandleApplyInterval()
 Declare HandleStartMinimizedToggle()
 Declare HandleTimer()
+Declare.i CheckSingleInstance()
+Declare ReleaseSingleInstance()
 
-; === DDE API Import ===
+; === Windows API Import ===
 Import "user32.lib"
   DdeInitializeW(pidInst, pfnCallback, afCmd, ulRes)
   DdeUninitialize(idInst)
@@ -63,6 +66,12 @@ Import "user32.lib"
   DdeFreeDataHandle(hData)
   DdeAccessData(hData, pcbDataSize)
   DdeUnaccessData(hData)
+EndImport
+
+Import "kernel32.lib"
+  CreateMutex_(lpMutexAttributes, bInitialOwner, lpName.p-unicode)
+  CloseHandle_(hObject)
+  GetLastError_()
 EndImport
 
 ; ============================================================================
@@ -527,6 +536,33 @@ EndProcedure
 Procedure HandleTimer()
   PollK3NGPosition()
   UpdateStatus()
+EndProcedure
+
+; ============================================================================
+; SINGLE INSTANCE
+; ============================================================================
+Procedure.i CheckSingleInstance()
+  Mutex = CreateMutex(#Null, #True, "Global\K3NG_Bridge_Mutex")
+
+  If Mutex = 0
+    ProcedureReturn #False
+  EndIf
+
+  If GetLastError_() = #ERROR_ALREADY_EXISTS
+    ; Another instance is already running
+    CloseHandle_(Mutex)
+    Mutex = 0
+    ProcedureReturn #False
+  EndIf
+
+  ProcedureReturn #True
+EndProcedure
+
+Procedure ReleaseSingleInstance()
+  If Mutex
+    CloseHandle_(Mutex)
+    Mutex = 0
+  EndIf
 EndProcedure
 
 ; ============================================================================
