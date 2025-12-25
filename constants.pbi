@@ -1,14 +1,72 @@
-; ============================================================================
+﻿; ============================================================================
 ; K3NG Bridge for VQ-Log
 ; Constants.pbi - Константы и перечисления
 ; ============================================================================
 
 ; === DDE Constants ===
-#APPCLASS_STANDARD = 0
-#CP_WINANSI = 1004
-#DNS_REGISTER = 1
-#DNS_UNREGISTER = 2
-#DMLERR_NO_ERROR = 0
+; Определяем только те константы, которых нет в PureBasic
+CompilerIf Not Defined(APPCLASS_STANDARD, #PB_Constant)
+  #APPCLASS_STANDARD = 0
+CompilerEndIf
+
+CompilerIf Not Defined(CP_WINANSI, #PB_Constant)
+  #CP_WINANSI = 1004
+CompilerEndIf
+
+CompilerIf Not Defined(DNS_REGISTER, #PB_Constant)
+  #DNS_REGISTER = 1
+CompilerEndIf
+
+CompilerIf Not Defined(DNS_UNREGISTER, #PB_Constant)
+  #DNS_UNREGISTER = 2
+CompilerEndIf
+
+CompilerIf Not Defined(DMLERR_NO_ERROR, #PB_Constant)
+  #DMLERR_NO_ERROR = 0
+CompilerEndIf
+
+; DDE Transaction Types
+CompilerIf Not Defined(XTYP_CONNECT, #PB_Constant)
+  #XTYP_CONNECT = $1062
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_DISCONNECT, #PB_Constant)
+  #XTYP_DISCONNECT = $10C2
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_REQUEST, #PB_Constant)
+  #XTYP_REQUEST = $20B0
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_POKE, #PB_Constant)
+  #XTYP_POKE = $4090
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_ADVSTART, #PB_Constant)
+  #XTYP_ADVSTART = $1030
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_ADVSTOP, #PB_Constant)
+  #XTYP_ADVSTOP = $8040
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_ADVREQ, #PB_Constant)
+  #XTYP_ADVREQ = $2022
+CompilerEndIf
+
+CompilerIf Not Defined(XTYP_ADVDATA, #PB_Constant)
+  #XTYP_ADVDATA = $4010
+CompilerEndIf
+
+; DDE Clipboard Formats
+CompilerIf Not Defined(CF_TEXT, #PB_Constant)
+  #CF_TEXT = 1
+CompilerEndIf
+
+; DDE Acknowledgement
+CompilerIf Not Defined(DDE_FACK, #PB_Constant)
+  #DDE_FACK = $8000
+CompilerEndIf
 
 ; === Application Constants ===
 #APP_NAME = "K3NG Bridge for VQ-Log"
@@ -63,7 +121,15 @@ Enumeration Gadgets
   #LabelManualElDeg
   #ButtonGo
   #ButtonStop
-  
+
+  ; Settings frame
+  #FrameSettings
+  #LabelPollInterval
+  #StringPollInterval
+  #LabelPollMs
+  #ButtonApplyInterval
+  #CheckStartMinimized
+
   ; Log frame
   #FrameLog
   #ListLog
