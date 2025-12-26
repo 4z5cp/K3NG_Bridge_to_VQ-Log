@@ -387,9 +387,11 @@ Procedure PollK3NGPosition()
         If CurrentElevation <> elPos
           CurrentElevation = elPos
           LastElevation = elPos  ; Сохраняем для DDE
-          ; Уведомляем VQ-Log об изменении элевации через ADVISE
-          If DDEInst And hszTopic And hszItemEl
-            DdePostAdvise(DDEInst, hszTopic, hszItemEl)
+          ; Уведомляем VQ-Log об изменении элевации
+          ; ВАЖНО: отправляем PostAdvise для AZIMUTH, а не ELEVATION!
+          ; VQ-Log устанавливает ADVISE loop только для AZIMUTH
+          If DDEInst And hszTopic And hszItemAz
+            DdePostAdvise(DDEInst, hszTopic, hszItemAz)
             LogMsg("DDE: Posted EL update = " + Str(CurrentElevation))
           EndIf
         EndIf
