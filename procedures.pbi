@@ -3,33 +3,49 @@
 ; Procedures.pbi - Процедуры и функции
 ; ============================================================================
 ;
-; ИСТОРИЯ РАЗРАБОТКИ И ВАЖНЫЕ МОМЕНТЫ:
+; КАК РАБОТАЕТ ОБНОВЛЕНИЕ ДАННЫХ:
 ;
 ; 1. DDE ПРОТОКОЛ:
-;    - VQ-Log использует DDE для связи с программами управления ротаторами
-;    - Регистрируются два сервиса: ARSWIN (старый) и ARSVCOM (современный)
-;    - Топик: RCI (Rotator Control Interface)
-;    - Элементы: AZIMUTH и ELEVATION
+;    - Программа работает как DDE сервер с именем "ARSVCOM" и топиком "RCI"
+;    - Элементы: AZIMUTH и ELEVATION (оба используются для передачи данных)
+;    - VQ-Log подключается к серверу и запрашивает данные
 ;
-; 2. ПРОБЛЕМА С ЭЛЕВАЦИЕЙ:
-;    - АЗИМУТ работает через стандартный ADVISE loop (VQ-Log подписывается)
-;    - ЭЛЕВАЦИЯ НЕ РАБОТАЕТ: VQ-Log НЕ устанавливает ADVISE для ELEVATION
-;    - VQ-Log отправляет POKE "RE:" для запроса элевации, но не принимает
-;      данные обратно ни одним из стандартных методов DDE
-;    - Попытки решения (все неудачные):
-;      * Возврат data handle из XTYP_POKE - игнорируется
-;      * DdePostAdvise для ELEVATION - ошибка DMLERR_NOTPROCESSED (нет ADVISE loop)
-;      * DdeClientTransaction с XTYP_ADVDATA - ошибка 16390 (DMLERR_NOTPROCESSED)
-;      * Отправка обоих значений "RA:355 RE:05" в AZIMUTH - не парсится
-;    - ВЫВОД: VQ-Log использует нестандартный протокол для элевации,
-;             нужна документация от разработчика
+; 2. МЕХАНИЗМ ОБНОВЛЕНИЯ АЗИМУТА И ЭЛЕВАЦИИ:
 ;
-; 3. ФОРМАТ ДАННЫХ:
-;    - Азимут: "RA:355" (всегда 3 цифры с ведущими нулями)
-;    - Элевация: "RE:05" (всегда 2 цифры с ведущими нулями)
+;    Шаг 1: ОПРОС КОНТРОЛЛЕРА (каждую 1 секунду по умолчанию)
+;    - PollK3NGPosition() отправляет команду "C2" контроллеру через TCP/IP
+;    - Контроллер возвращает: "AZ=355 EL=5"
+;    - Если значения изменились:
+;      * CurrentAzimuth = 355, CurrentElevation = 5
+;      * LastAzimuth = 355, LastElevation = 5 (сохраняем снапшот для DDE)
+;      * DdePostAdvise() уведомляет VQ-Log что данные обновились
+;
+;    Шаг 2: VQ-Log ЗАПРАШИВАЕТ ДАННЫЕ (по POKE протоколу)
+;    - VQ-Log отправляет POKE "RA:" для запроса азимута
+;      или POKE "RE:" для запроса элевации
+;    - Мы устанавливаем LastRequestType = "RA" или "RE"
+;    - Вызываем DdePostAdvise() для элемента AZIMUTH
+;
+;    Шаг 3: VQ-Log ПОЛУЧАЕТ ДАННЫЕ (через ADVREQ)
+;    - VQ-Log делает ADVREQ запрос к элементу AZIMUTH
+;    - Проверяем LastRequestType:
+;      * Если "RA" → отправляем "RA:355" (азимут)
+;      * Если "RE" → отправляем "RE:5" (элевация)
+;    - VQ-Log получает данные и отображает их
+;
+; 3. ВАЖНО:
+;    - И азимут и элевация передаются через элемент AZIMUTH!
+;    - Элемент ELEVATION зарегистрирован, но не используется VQ-Log
+;    - LastRequestType определяет какие данные отправить
+;    - Last* переменные защищены от race conditions при опросе контроллера
+;    - Значения отправляются без ведущих нулей: "RA:5" а не "RA:005"
+;
+; 4. ФОРМАТ ДАННЫХ:
+;    - Азимут: "RA:355" или "RA:0" (без ведущих нулей)
+;    - Элевация: "RE:5" или "RE:0" (без ведущих нулей)
 ;    - Команды управления: "GA:180" (азимут), "GE:45" (элевация)
 ;
-; 4. TCP/IP К K3NG КОНТРОЛЛЕРУ:
+; 5. TCP/IP К K3NG КОНТРОЛЛЕРУ:
 ;    - Используется протокол GS232B
 ;    - Команды: C2 (запрос позиции), M<azimuth> (поворот азимута),
 ;               W<elevation> (поворот элевации), S (стоп)
@@ -52,7 +68,6 @@ EndStructure
 Global Config.AppConfig
 Global DDEInst.l = 0
 Global hszService.l = 0          ; DDE string handle для ARSVCOM
-Global hszService2.l = 0         ; DDE string handle для ARSWIN
 Global hszTopic.l = 0            ; DDE string handle для RCI
 Global hszItemAz.l = 0           ; DDE string handle для AZIMUTH
 Global hszItemEl.l = 0           ; DDE string handle для ELEVATION
@@ -469,13 +484,9 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
   Select uType
     Case #XTYP_CONNECT
       ; hsz1 = Topic, hsz2 = Service
-      ; Проверяем, что клиент подключается к ARSVCOM|RCI или ARSWIN|RCI
-      If hsz1 = hszTopic And (hsz2 = hszService Or hsz2 = hszService2)
-        If hsz2 = hszService
-          LogMsg("DDE: Подключено к ARSVCOM")
-        Else
-          LogMsg("DDE: Подключено к ARSWIN")
-        EndIf
+      ; Проверяем, что клиент подключается к ARSVCOM|RCI
+      If hsz1 = hszTopic And hsz2 = hszService
+        LogMsg("DDE: Подключено к ARSVCOM|RCI")
         result = #True
       Else
         LogMsg("DDE: Соединение отклонено")
@@ -650,23 +661,15 @@ Procedure.i InitDDEServer()
   EndIf
 
   hszService = DdeCreateStringHandleW(DDEInst, "ARSVCOM", #CP_WINUNICODE)
-  hszService2 = DdeCreateStringHandleW(DDEInst, "ARSWIN", #CP_WINUNICODE)
   hszTopic = DdeCreateStringHandleW(DDEInst, "RCI", #CP_WINUNICODE)
   hszItemAz = DdeCreateStringHandleW(DDEInst, "AZIMUTH", #CP_WINUNICODE)
   hszItemEl = DdeCreateStringHandleW(DDEInst, "ELEVATION", #CP_WINUNICODE)
 
-  ; Регистрируем оба сервиса для совместимости
+  ; Регистрируем DDE сервер ARSVCOM|RCI
   If DdeNameService(DDEInst, hszService, 0, #DNS_REGISTER)
     LogMsg("DDE: Сервер ARSVCOM|RCI зарегистрирован")
   Else
     LogMsg("DDE: Ошибка регистрации сервиса ARSVCOM")
-    ProcedureReturn #False
-  EndIf
-
-  If DdeNameService(DDEInst, hszService2, 0, #DNS_REGISTER)
-    LogMsg("DDE: Сервер ARSWIN|RCI зарегистрирован")
-  Else
-    LogMsg("DDE: Ошибка регистрации сервиса ARSWIN")
     ProcedureReturn #False
   EndIf
 
@@ -679,9 +682,7 @@ EndProcedure
 Procedure CleanupDDEServer()
   If DDEInst
     DdeNameService(DDEInst, hszService, 0, #DNS_UNREGISTER)
-    DdeNameService(DDEInst, hszService2, 0, #DNS_UNREGISTER)
     DdeFreeStringHandle(DDEInst, hszService)
-    DdeFreeStringHandle(DDEInst, hszService2)
     DdeFreeStringHandle(DDEInst, hszTopic)
     DdeFreeStringHandle(DDEInst, hszItemAz)
     DdeFreeStringHandle(DDEInst, hszItemEl)
@@ -828,7 +829,7 @@ Procedure UpdateStatus()
   EndIf
   
   If DDEInst
-    SetGadgetText(#LabelDDEStatus, "DDE: ARSWIN/ARSVCOM|RCI")
+    SetGadgetText(#LabelDDEStatus, "DDE: ARSVCOM|RCI")
     SetGadgetColor(#LabelDDEStatus, #PB_Gadget_FrontColor, RGB(0, 128, 0))
   Else
     SetGadgetText(#LabelDDEStatus, "DDE: Не запущен")
