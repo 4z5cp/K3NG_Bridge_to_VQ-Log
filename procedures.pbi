@@ -262,7 +262,7 @@ Procedure.i ConnectToK3NG()
   EndIf
 
   startTime = ElapsedMilliseconds()
-  While IsThread(threadID) And (ElapsedMilliseconds() - startTime) < #CONNECT_TIMEOUT
+  While IsThread(threadID) And (ElapsedMilliseconds() - startTime) < #CONNECT_TIMEOUT And Not AppShuttingDown
     Delay(50)
     While WindowEvent() : Wend
   Wend
@@ -270,7 +270,9 @@ Procedure.i ConnectToK3NG()
   If IsThread(threadID)
     KillThread(threadID)
     Config\Connected = #False
-    LogMsg("TCP: Connection timeout (will retry)")
+    If Not AppShuttingDown
+      LogMsg("TCP: Connection timeout (will retry)")
+    EndIf
     ProcedureReturn #False
   ElseIf Config\Connected
     LogMsg("TCP: Connected to " + Config\K3ngIP + ":" + Str(Config\K3ngPort))
