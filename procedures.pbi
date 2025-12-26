@@ -561,27 +561,11 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RE:"
-          ; РЕШЕНИЕ НАЙДЕНО! VQ-Log ожидает элевацию через POKE обратно в элемент AZIMUTH!
-          ; (Как в коде Qt: DDE_VQLog.poke("ARSVCOM","RCI","AZIMUTH","RE:05"))
+          ; VQ-Log запрашивает элевацию - отправляем обновление через PostAdvise
+          ; VQ-Log получит оба значения (RA и RE) в ответе на следующий ADVREQ для AZIMUTH
           LogMsg("DDE: RE POKE request - current EL=" + Str(CurrentElevation))
-          Protected elResponse.s, *elBuf, elBufLen.i, hElData.l, dwResult.l
-          elResponse = "RE:" + RSet(Str(CurrentElevation), 2, "0")
-          elBufLen = Len(elResponse) + 1
-          *elBuf = AllocateMemory(elBufLen)
-          If *elBuf
-            PokeS(*elBuf, elResponse, -1, #PB_Ascii)
-            ; ВАЖНО: Отправляем в элемент AZIMUTH, а не ELEVATION!
-            hElData = DdeCreateDataHandle(DDEInst, *elBuf, elBufLen, 0, hszItemAz, #CF_TEXT, 0)
-            If hElData
-              ; Отправляем POKE обратно в элемент AZIMUTH с данными "RE:05"
-              If DdeClientTransaction(hElData, -1, hconv, hszItemAz, #CF_TEXT, #XTYP_POKE, 1000, @dwResult)
-                LogMsg("DDE: Sent POKE to AZIMUTH with RE: " + elResponse)
-              Else
-                LogMsg("DDE: POKE to AZIMUTH failed for RE (error=" + Str(DdeGetLastError(DDEInst)) + ")")
-              EndIf
-              DdeFreeDataHandle(hElData)
-            EndIf
-            FreeMemory(*elBuf)
+          If hszItemAz
+            DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
           result = #DDE_FACK
         Else
