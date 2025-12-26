@@ -54,6 +54,10 @@ CompilerIf Not Defined(XTYP_ADVREQ, #PB_Constant)
   #XTYP_ADVREQ = $2022
 CompilerEndIf
 
+CompilerIf Not Defined(XTYP_WILDCONNECT, #PB_Constant)
+  #XTYP_WILDCONNECT = $2062
+CompilerEndIf
+
 CompilerIf Not Defined(XTYP_ADVDATA, #PB_Constant)
   #XTYP_ADVDATA = $4010
 CompilerEndIf
@@ -66,6 +70,15 @@ CompilerEndIf
 ; DDE Acknowledgement
 CompilerIf Not Defined(DDE_FACK, #PB_Constant)
   #DDE_FACK = $8000
+CompilerEndIf
+
+; DDE Callback Filter Flags
+CompilerIf Not Defined(APPCMD_CLIENTONLY, #PB_Constant)
+  #APPCMD_CLIENTONLY = $00000010
+CompilerEndIf
+
+CompilerIf Not Defined(APPCLASS_STANDARD, #PB_Constant)
+  #APPCLASS_STANDARD = $00000000
 CompilerEndIf
 
 ; === Windows Constants ===

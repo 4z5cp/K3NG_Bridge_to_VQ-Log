@@ -2,6 +2,39 @@
 ; K3NG Bridge for VQ-Log
 ; Procedures.pbi - Процедуры и функции
 ; ============================================================================
+;
+; ИСТОРИЯ РАЗРАБОТКИ И ВАЖНЫЕ МОМЕНТЫ:
+;
+; 1. DDE ПРОТОКОЛ:
+;    - VQ-Log использует DDE для связи с программами управления ротаторами
+;    - Регистрируются два сервиса: ARSWIN (старый) и ARSVCOM (современный)
+;    - Топик: RCI (Rotator Control Interface)
+;    - Элементы: AZIMUTH и ELEVATION
+;
+; 2. ПРОБЛЕМА С ЭЛЕВАЦИЕЙ:
+;    - АЗИМУТ работает через стандартный ADVISE loop (VQ-Log подписывается)
+;    - ЭЛЕВАЦИЯ НЕ РАБОТАЕТ: VQ-Log НЕ устанавливает ADVISE для ELEVATION
+;    - VQ-Log отправляет POKE "RE:" для запроса элевации, но не принимает
+;      данные обратно ни одним из стандартных методов DDE
+;    - Попытки решения (все неудачные):
+;      * Возврат data handle из XTYP_POKE - игнорируется
+;      * DdePostAdvise для ELEVATION - ошибка DMLERR_NOTPROCESSED (нет ADVISE loop)
+;      * DdeClientTransaction с XTYP_ADVDATA - ошибка 16390 (DMLERR_NOTPROCESSED)
+;      * Отправка обоих значений "RA:355 RE:05" в AZIMUTH - не парсится
+;    - ВЫВОД: VQ-Log использует нестандартный протокол для элевации,
+;             нужна документация от разработчика
+;
+; 3. ФОРМАТ ДАННЫХ:
+;    - Азимут: "RA:355" (всегда 3 цифры с ведущими нулями)
+;    - Элевация: "RE:05" (всегда 2 цифры с ведущими нулями)
+;    - Команды управления: "GA:180" (азимут), "GE:45" (элевация)
+;
+; 4. TCP/IP К K3NG КОНТРОЛЛЕРУ:
+;    - Используется протокол GS232B
+;    - Команды: C2 (запрос позиции), M<azimuth> (поворот азимута),
+;               W<elevation> (поворот элевации), S (стоп)
+;
+; ============================================================================
 
 ; === Structures ===
 Structure AppConfig
@@ -18,15 +51,17 @@ EndStructure
 ; === Global Variables ===
 Global Config.AppConfig
 Global DDEInst.l = 0
-Global hszService.l = 0
+Global hszService.l = 0      ; ARSVCOM (основной)
+Global hszService2.l = 0     ; ARSWIN (для совместимости)
 Global hszTopic.l = 0
-Global hszItemAz.l = 0
-Global hszItemEl.l = 0
+Global hszItemAz.l = 0       ; AZIMUTH item
+Global hszItemEl.l = 0       ; ELEVATION item
 Global TCPConnection.i = 0
 Global CurrentAzimuth.i = 0
 Global CurrentElevation.i = 0
 Global TargetAzimuth.i = -1
 Global Mutex.i = 0
+Global DDEConversation.l = 0     ; Хэндл server conversation (когда VQ-Log подключается к нам)
 
 ; === Procedure Declarations ===
 Declare LogMsg(msg.s)
@@ -66,13 +101,14 @@ Import "user32.lib"
   DdeFreeDataHandle(hData)
   DdeAccessData(hData, pcbDataSize)
   DdeUnaccessData(hData)
+  DdePostAdvise(idInst, hszTopic, hszItem)
+  DdeQueryStringW(idInst, hsz, psz, cchMax, iCodePage)
+  DdeConnect(idInst, hszService, hszTopic, pCC)
+  DdeDisconnect(hConv)
+  DdeClientTransaction(pData, cbData, hConv, hszItem, wFmt, wType, dwTimeout, pdwResult)
+  DdeGetLastError(idInst)
 EndImport
 
-Import "kernel32.lib"
-  CreateMutex_(lpMutexAttributes, bInitialOwner, lpName.p-unicode)
-  CloseHandle_(hObject)
-  GetLastError_()
-EndImport
 
 ; ============================================================================
 ; LOGGING
@@ -260,7 +296,7 @@ Procedure.s SendK3NGCommand(cmd.s)
     ProcedureReturn ""
   EndIf
 
-  LogMsg("TCP TX: " + cmd)
+  ; LogMsg("TCP TX: " + cmd)  ; Отключено для уменьшения шума в логах
 
   startTime = ElapsedMilliseconds()
   Repeat
@@ -278,32 +314,81 @@ Procedure.s SendK3NGCommand(cmd.s)
   FreeMemory(*buffer)
 
   received = Trim(ReplaceString(ReplaceString(received, #CR$, ""), #LF$, ""))
-  If received <> ""
-    LogMsg("TCP RX: " + received)
-  EndIf
+  ; If received <> ""
+  ;   LogMsg("TCP RX: " + received)  ; Отключено для уменьшения шума в логах
+  ; EndIf
 
   ProcedureReturn received
 EndProcedure
 
 Procedure PollK3NGPosition()
   Protected response.s, azPos.i, elPos.i
-  
+  Protected dataReceived.i = #False
+
   If Not TCPConnection Or Config\Mode = #MODE_LOG_TO_CONTROLLER
+    ; Контроллер не подключен - сбрасываем значения в 0
+    If CurrentAzimuth <> 0 Or CurrentElevation <> 0
+      CurrentAzimuth = 0
+      CurrentElevation = 0
+      If DDEInst And hszTopic
+        If hszItemAz
+          DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+          LogMsg("DDE: Posted AZ update = 0 (controller disconnected)")
+        EndIf
+        If hszItemEl
+          DdePostAdvise(DDEInst, hszTopic, hszItemEl)
+          LogMsg("DDE: Posted EL update = 0 (controller disconnected)")
+        EndIf
+      EndIf
+    EndIf
     ProcedureReturn
   EndIf
-  
+
   response = SendK3NGCommand("C2")
-  
-  If FindString(response, "AZ=")
+
+  ; Проверяем получили ли валидный ответ от контроллера
+  If response <> "" And FindString(response, "AZ=")
+    dataReceived = #True
+
     azPos = Val(Mid(response, FindString(response, "AZ=") + 3, 3))
     If azPos >= 0 And azPos <= 360
-      CurrentAzimuth = azPos
+      If CurrentAzimuth <> azPos
+        CurrentAzimuth = azPos
+        ; Уведомляем VQ-Log об изменении азимута через ADVISE
+        If DDEInst And hszTopic And hszItemAz
+          DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+          LogMsg("DDE: Posted AZ update = " + Str(CurrentAzimuth))
+        EndIf
+      EndIf
     EndIf
-    
+
     If FindString(response, "EL=")
       elPos = Val(Mid(response, FindString(response, "EL=") + 3, 3))
       If elPos >= 0 And elPos <= 180
-        CurrentElevation = elPos
+        If CurrentElevation <> elPos
+          CurrentElevation = elPos
+          ; Уведомляем VQ-Log об изменении элевации через ADVISE
+          If DDEInst And hszTopic And hszItemEl
+            DdePostAdvise(DDEInst, hszTopic, hszItemEl)
+            LogMsg("DDE: Posted EL update = " + Str(CurrentElevation))
+          EndIf
+        EndIf
+      EndIf
+    EndIf
+  Else
+    ; Контроллер не ответил - сбрасываем в 0
+    If CurrentAzimuth <> 0 Or CurrentElevation <> 0
+      CurrentAzimuth = 0
+      CurrentElevation = 0
+      If DDEInst And hszTopic
+        If hszItemAz
+          DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+          LogMsg("DDE: Posted AZ update = 0 (no response)")
+        EndIf
+        If hszItemEl
+          DdePostAdvise(DDEInst, hszTopic, hszItemEl)
+          LogMsg("DDE: Posted EL update = 0 (no response)")
+        EndIf
       EndIf
     EndIf
   EndIf
@@ -370,53 +455,183 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
   Protected result.l = 0
   Protected *data, dataSize.l, dataStr.s
   Protected cmdValue.i
+  Protected debugMsg.s
+
+  ; Детальное логирование всех DDE транзакций для отладки
+  debugMsg = "DDE Callback: type=$" + RSet(Hex(uType), 4, "0") + " fmt=$" + Hex(uFmt) + " hconv=$" + Hex(hconv)
+  LogMsg(debugMsg)
 
   Select uType
     Case #XTYP_CONNECT
-      LogMsg("DDE: Client connected")
-      result = #True
+      ; hsz1 = Topic, hsz2 = Service
+      ; Проверяем, что клиент подключается к ARSVCOM|RCI или ARSWIN|RCI
+      If hsz1 = hszTopic And (hsz2 = hszService Or hsz2 = hszService2)
+        If hsz2 = hszService
+          LogMsg("DDE: Подключено к ARSVCOM")
+        Else
+          LogMsg("DDE: Подключено к ARSWIN")
+        EndIf
+        result = #True
+      Else
+        LogMsg("DDE: Соединение отклонено")
+        result = #False
+      EndIf
 
-    Case #XTYP_REQUEST
+    Case #XTYP_REQUEST, #XTYP_ADVREQ
+      ; Декодируем item для логирования
+      Protected itemStr.s{128}
+      DdeQueryStringW(DDEInst, hsz2, @itemStr, 128, #CP_WINUNICODE)
+
+      Protected transType.s
+      If uType = #XTYP_REQUEST
+        transType = "REQUEST"
+      Else
+        transType = "ADVREQ"
+      EndIf
+
       If uFmt = #CF_TEXT
-        dataStr = Str(CurrentAzimuth) + Chr(0)
-        result = DdeCreateDataHandle(DDEInst, @dataStr, Len(dataStr) + 1, 0, hsz2, #CF_TEXT, 0)
-        LogMsg("DDE: Request AZ=" + Str(CurrentAzimuth))
+        Protected *buffer, bufLen.i
+        If hsz2 = hszItemAz
+          ; АЗИМУТ: Возвращаем оба значения в одной строке как попытка решения
+          ; проблемы с элевацией (VQ-Log может парсить строку целиком)
+          ; TODO: После получения ответа от разработчика VQ-Log, возможно потребуется изменить
+          dataStr = "RA:" + RSet(Str(CurrentAzimuth), 3, "0") + " RE:" + RSet(Str(CurrentElevation), 2, "0")
+          bufLen = Len(dataStr) + 1
+          *buffer = AllocateMemory(bufLen)
+          If *buffer
+            PokeS(*buffer, dataStr, -1, #PB_Ascii)
+            result = DdeCreateDataHandle(DDEInst, *buffer, bufLen, 0, hsz2, #CF_TEXT, 0)
+            FreeMemory(*buffer)
+            LogMsg("DDE: " + transType + " for AZIMUTH -> " + dataStr)
+          EndIf
+        ElseIf hsz2 = hszItemEl
+          ; ЭЛЕВАЦИЯ: VQ-Log никогда не запрашивает этот элемент через REQUEST/ADVREQ
+          ; Элемент зарегистрирован, но фактически не используется
+          ; VQ-Log использует POKE "RE:" вместо REQUEST (см. ниже)
+          dataStr = "RE:" + RSet(Str(CurrentElevation), 2, "0")
+          bufLen = Len(dataStr) + 1
+          *buffer = AllocateMemory(bufLen)
+          If *buffer
+            PokeS(*buffer, dataStr, -1, #PB_Ascii)
+            result = DdeCreateDataHandle(DDEInst, *buffer, bufLen, 0, hsz2, #CF_TEXT, 0)
+            FreeMemory(*buffer)
+            LogMsg("DDE: " + transType + " for ELEVATION -> " + dataStr)
+          EndIf
+        Else
+          LogMsg("DDE: " + transType + " for UNKNOWN item: " + itemStr)
+        EndIf
       EndIf
 
     Case #XTYP_POKE
-      If hdata And (Config\Mode = #MODE_LOG_TO_CONTROLLER Or Config\Mode = #MODE_BIDIRECTIONAL)
-        *data = DdeAccessData(hdata, @dataSize)
-        If *data
-          dataStr = PeekS(*data, dataSize, #PB_Ascii)
-          DdeUnaccessData(hdata)
+      ; Сохраняем conversation handle если еще не сохранен
+      If DDEConversation = 0
+        DDEConversation = hconv
+      EndIf
 
-          LogMsg("DDE: Received: " + dataStr)
+      *data = DdeAccessData(hdata, @dataSize)
+      If *data
+        dataStr = PeekS(*data, dataSize, #PB_Ascii)
+        DdeUnaccessData(hdata)
 
-          If Left(UCase(dataStr), 3) = "GA:"
+        LogMsg("DDE: Received: " + dataStr + " (hconv=" + Str(hconv) + ")")
+
+        If Left(UCase(dataStr), 3) = "GA:"
+          ; Команда управления - поворот азимута
+          If Config\Mode = #MODE_LOG_TO_CONTROLLER Or Config\Mode = #MODE_BIDIRECTIONAL
             cmdValue = Val(Mid(dataStr, 4))
             If cmdValue >= 0 And cmdValue <= 360
               RotateToAzimuth(cmdValue)
             EndIf
-          ElseIf Left(UCase(dataStr), 3) = "GE:"
+          EndIf
+          result = #DDE_FACK
+        ElseIf Left(UCase(dataStr), 3) = "GE:"
+          ; Команда управления - поворот элевации
+          If Config\Mode = #MODE_LOG_TO_CONTROLLER Or Config\Mode = #MODE_BIDIRECTIONAL
             cmdValue = Val(Mid(dataStr, 4))
             If cmdValue >= 0 And cmdValue <= 180
               RotateToElevation(cmdValue)
             EndIf
           EndIf
+          result = #DDE_FACK
+        ElseIf Left(UCase(dataStr), 3) = "RA:"
+          ; VQ-Log запрашивает азимут - отправляем обновление
+          LogMsg("DDE: RA POKE request - current AZ=" + Str(CurrentAzimuth))
+          If hszItemAz
+            DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+          EndIf
+          result = #DDE_FACK
+        ElseIf Left(UCase(dataStr), 3) = "RE:"
+          ; ПРОБЛЕМА ЭЛЕВАЦИИ: VQ-Log отправляет POKE "RE:" для запроса элевации,
+          ; но не принимает данные обратно стандартными методами DDE.
+          ; Попытка отправить через XTYP_ADVDATA - НЕ РАБОТАЕТ (ошибка 16390 DMLERR_NOTPROCESSED)
+          ; потому что VQ-Log не установил ADVISE loop для ELEVATION.
+          ; TODO: Ожидаем ответа от разработчика VQ-Log о правильном способе передачи элевации
+          LogMsg("DDE: RE POKE request - current EL=" + Str(CurrentElevation))
+          Protected elResponse.s, *elBuf, elBufLen.i, hElData.l, dwResult.l
+          elResponse = "RE:" + RSet(Str(CurrentElevation), 2, "0")
+          elBufLen = Len(elResponse) + 1
+          *elBuf = AllocateMemory(elBufLen)
+          If *elBuf
+            PokeS(*elBuf, elResponse, -1, #PB_Ascii)
+            hElData = DdeCreateDataHandle(DDEInst, *elBuf, elBufLen, 0, hszItemEl, #CF_TEXT, 0)
+            If hElData
+              ; Пробуем отправить unsolicited data через ADVDATA (НЕ РАБОТАЕТ!)
+              If DdeClientTransaction(hElData, -1, hconv, hszItemEl, #CF_TEXT, #XTYP_ADVDATA, 1000, @dwResult)
+                LogMsg("DDE: Sent ADVDATA for RE: " + elResponse)
+              Else
+                LogMsg("DDE: ADVDATA failed for RE (error=" + Str(DdeGetLastError(DDEInst)) + ")")
+              EndIf
+              DdeFreeDataHandle(hElData)
+            EndIf
+            FreeMemory(*elBuf)
+          EndIf
+          result = #DDE_FACK
+        Else
+          result = #DDE_FACK
         EndIf
+      Else
         result = #DDE_FACK
       EndIf
 
-    Case #XTYP_ADVSTART
-      LogMsg("DDE: Advise loop started")
+    Case #XTYP_ADVSTART, $80A2
+      ; Декодируем topic и item
+      Protected topicName.s{128}, itemName.s{128}
+      DdeQueryStringW(DDEInst, hsz1, @topicName, 128, #CP_WINUNICODE)
+      DdeQueryStringW(DDEInst, hsz2, @itemName, 128, #CP_WINUNICODE)
+      ; Сохраняем conversation handle для отправки POKE
+      DDEConversation = hconv
+      LogMsg("DDE: Advise " + topicName + "|" + itemName + " (hconv=" + Str(hconv) + ")")
       result = #True
 
-    Case #XTYP_ADVSTOP
+    Case #XTYP_ADVSTOP, $80D2
       LogMsg("DDE: Advise loop stopped")
       result = #True
 
     Case #XTYP_DISCONNECT
-      LogMsg("DDE: Client disconnected")
+      LogMsg("DDE: Client disconnected (hconv=" + Str(hconv) + ")")
+      If DDEConversation = hconv
+        DDEConversation = 0
+      EndIf
+      result = 0
+
+    Case #XTYP_WILDCONNECT
+      ; Клиент делает wildcard connect - вернуть список доступных topic
+      LogMsg("DDE: Wildcard connect request")
+      ; Создаем список пар Service|Topic
+      ; Формат: массив из HSZPAIR структур, завершающийся NULL парой
+      Protected *hszPair, pairSize.i = 8 ; 2 DWORD по 4 байта
+      *hszPair = AllocateMemory(pairSize * 2) ; одна пара + null пара
+      If *hszPair
+        PokeL(*hszPair, hszService)
+        PokeL(*hszPair + 4, hszTopic)
+        PokeL(*hszPair + 8, 0)
+        PokeL(*hszPair + 12, 0)
+        result = DdeCreateDataHandle(DDEInst, *hszPair, pairSize * 2, 0, 0, #CF_TEXT, 0)
+        FreeMemory(*hszPair)
+      EndIf
+
+    Default
+      ; Игнорируем неизвестные типы сообщений
       result = 0
 
   EndSelect
@@ -426,37 +641,56 @@ EndProcedure
 
 Procedure.i InitDDEServer()
   Protected result.l
+  Protected ddeFlags.l
 
-  result = DdeInitializeW(@DDEInst, @DDECallback(), #APPCLASS_STANDARD, 0)
+  ; Используем флаги для сервера: разрешаем все транзакции
+  ddeFlags = 0  ; Без фильтрации callback
+
+  result = DdeInitializeW(@DDEInst, @DDECallback(), ddeFlags, 0)
   If result <> #DMLERR_NO_ERROR
     LogMsg("DDE: Initialization error, code " + Str(result))
     ProcedureReturn #False
   EndIf
 
-  hszService = DdeCreateStringHandleW(DDEInst, "ARSWIN", #CP_WINANSI)
-  hszTopic = DdeCreateStringHandleW(DDEInst, "RCI", #CP_WINANSI)
-  hszItemAz = DdeCreateStringHandleW(DDEInst, "AZIMUTH", #CP_WINANSI)
-  hszItemEl = DdeCreateStringHandleW(DDEInst, "ELEVATION", #CP_WINANSI)
+  hszService = DdeCreateStringHandleW(DDEInst, "ARSVCOM", #CP_WINUNICODE)
+  hszService2 = DdeCreateStringHandleW(DDEInst, "ARSWIN", #CP_WINUNICODE)
+  hszTopic = DdeCreateStringHandleW(DDEInst, "RCI", #CP_WINUNICODE)
+  hszItemAz = DdeCreateStringHandleW(DDEInst, "AZIMUTH", #CP_WINUNICODE)
+  hszItemEl = DdeCreateStringHandleW(DDEInst, "ELEVATION", #CP_WINUNICODE)
 
+  ; Регистрируем оба сервиса для совместимости
   If DdeNameService(DDEInst, hszService, 0, #DNS_REGISTER)
-    LogMsg("DDE: Server started (ARSWIN|RCI)")
-    ProcedureReturn #True
+    LogMsg("DDE: Сервер ARSVCOM|RCI зарегистрирован")
   Else
-    LogMsg("DDE: Service registration error")
+    LogMsg("DDE: Ошибка регистрации сервиса ARSVCOM")
     ProcedureReturn #False
   EndIf
+
+  If DdeNameService(DDEInst, hszService2, 0, #DNS_REGISTER)
+    LogMsg("DDE: Сервер ARSWIN|RCI зарегистрирован")
+  Else
+    LogMsg("DDE: Ошибка регистрации сервиса ARSWIN")
+    ProcedureReturn #False
+  EndIf
+
+  ProcedureReturn #True
 EndProcedure
+
+; Функции для подключения к VQ-Log как клиент удалены - не используются
+; Мы работаем только как DDE сервер
 
 Procedure CleanupDDEServer()
   If DDEInst
     DdeNameService(DDEInst, hszService, 0, #DNS_UNREGISTER)
+    DdeNameService(DDEInst, hszService2, 0, #DNS_UNREGISTER)
     DdeFreeStringHandle(DDEInst, hszService)
+    DdeFreeStringHandle(DDEInst, hszService2)
     DdeFreeStringHandle(DDEInst, hszTopic)
     DdeFreeStringHandle(DDEInst, hszItemAz)
     DdeFreeStringHandle(DDEInst, hszItemEl)
     DdeUninitialize(DDEInst)
     DDEInst = 0
-    LogMsg("DDE: Server stopped")
+    LogMsg("DDE: Сервер остановлен")
   EndIf
 EndProcedure
 
@@ -542,25 +776,41 @@ EndProcedure
 ; SINGLE INSTANCE
 ; ============================================================================
 Procedure.i CheckSingleInstance()
-  Mutex = CreateMutex(#Null, #True, "Global\K3NG_Bridge_Mutex")
+  Protected lockFile.s = GetTemporaryDirectory() + "K3NG_Bridge.lock"
 
+  ; Check if lock file exists
+  If FileSize(lockFile) >= 0
+    ; Lock file exists - another instance might be running
+    ; Try to open it exclusively to verify
+    Mutex = OpenFile(#PB_Any, lockFile, #PB_File_SharedRead)
+    If Mutex = 0
+      ; Can't open - another instance is running
+      ProcedureReturn #False
+    Else
+      ; Could open - previous instance didn't clean up, overwrite
+      CloseFile(Mutex)
+      DeleteFile(lockFile)
+    EndIf
+  EndIf
+
+  ; Create lock file
+  Mutex = CreateFile(#PB_Any, lockFile)
   If Mutex = 0
     ProcedureReturn #False
   EndIf
 
-  If GetLastError_() = #ERROR_ALREADY_EXISTS
-    ; Another instance is already running
-    CloseHandle_(Mutex)
-    Mutex = 0
-    ProcedureReturn #False
-  EndIf
+  WriteStringN(Mutex, Str(GetCurrentProcessId_()))
+  FlushFileBuffers(Mutex)
 
   ProcedureReturn #True
 EndProcedure
 
 Procedure ReleaseSingleInstance()
+  Protected lockFile.s = GetTemporaryDirectory() + "K3NG_Bridge.lock"
+
   If Mutex
-    CloseHandle_(Mutex)
+    CloseFile(Mutex)
+    DeleteFile(lockFile)
     Mutex = 0
   EndIf
 EndProcedure
@@ -581,7 +831,7 @@ Procedure UpdateStatus()
   EndIf
   
   If DDEInst
-    SetGadgetText(#LabelDDEStatus, "DDE: ARSWIN|RCI")
+    SetGadgetText(#LabelDDEStatus, "DDE: ARSWIN/ARSVCOM|RCI")
     SetGadgetColor(#LabelDDEStatus, #PB_Gadget_FrontColor, RGB(0, 128, 0))
   Else
     SetGadgetText(#LabelDDEStatus, "DDE: Не запущен")

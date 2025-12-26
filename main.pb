@@ -3,14 +3,26 @@
 ; Main.pb - Основной файл программы
 ; ============================================================================
 ;
+; ОПИСАНИЕ:
+;   Программа-мост между K3NG контроллером ротатора (TCP/IP, протокол GS232B)
+;   и программой VQ-Log (DDE протокол ARSWIN/ARSVCOM|RCI)
+;
 ; ВАЖНО: Компилировать с включённой опцией "Create threadsafe executable"
 ; (Compiler -> Compiler Options -> Create threadsafe executable)
 ;
-; Структура проекта:
+; СТРУКТУРА ПРОЕКТА:
 ;   Main.pb        - Основной файл (этот файл)
 ;   Constants.pbi  - Константы и перечисления
-;   Procedures.pbi - Процедуры и функции
+;   Procedures.pbi - Процедуры и функции (см. комментарии там для деталей)
 ;   Windows.pbi    - Окна и гаджеты
+;
+; ТЕКУЩЕЕ СОСТОЯНИЕ:
+;   ✅ Азимут работает корректно (передача данных "RA:355" в VQ-Log)
+;   ✅ Команды управления GA:/GE: работают
+;   ✅ TCP/IP связь с K3NG контроллером работает
+;   ❌ Элевация НЕ работает - VQ-Log не принимает данные "RE:05"
+;      (Причина: нестандартный протокол VQ-Log, ожидаем ответ разработчика)
+;
 ; ============================================================================
 
 EnableExplicit
@@ -25,29 +37,50 @@ XIncludeFile "Windows.pbi"
 ; ============================================================================
 Procedure Main()
   Protected event.i, gadget.i, quit.i = #False
+  Protected i.i, cmdLine.s
 
-  ; Проверка единственного экземпляра
-  If Not CheckSingleInstance()
-    ; Приложение уже запущено - тихо выходим
-    ProcedureReturn
-  EndIf
+  ; Логируем параметры командной строки
+  cmdLine = "Command line params: "
+  For i = 0 To CountProgramParameters() - 1
+    cmdLine + "[" + Str(i) + "]=" + ProgramParameter(i) + " "
+  Next
+
+  ; Проверка единственного экземпляра - ОТКЛЮЧЕНА для работы с VQ-Log
+  ; VQ-Log может запускать приложение несколько раз для разных DDE сервисов
+  ;If Not CheckSingleInstance()
+  ;  ; Приложение уже запущено - тихо выходим
+  ;  ProcedureReturn
+  ;EndIf
 
   ; Загрузка конфигурации
   LoadConfig()
 
-  ; Создание главного окна
+  ; ВАЖНО: Создаем окно первым делом для message loop
   CreateMainWindow()
 
-  ; Минимизация окна при запуске, если опция включена
-  If Config\StartMinimized
-    SetWindowState(#MainWindow, #PB_Window_Minimize)
-  EndIf
+  ; Выводим параметры командной строки в лог
+  LogMsg(cmdLine)
 
-  ; Запуск DDE сервера
+  ; Запуск DDE сервера СРАЗУ после создания окна
+  ; Это критично - VQ-Log ждет что DDE сервер будет доступен немедленно
   If InitDDEServer()
     LogMsg("Application started")
   Else
     LogMsg("DDE server start error")
+  EndIf
+
+  ; Обрабатываем сообщения Windows чтобы завершить регистрацию DDE
+  ; Увеличиваем количество итераций и задержку для надежной инициализации
+  For i = 1 To 50
+    WindowEvent()
+    Delay(20)
+  Next
+
+  LogMsg("DDE: Инициализация завершена, сервер готов к подключениям")
+
+  ; Минимизация окна при запуске, если опция включена
+  If Config\StartMinimized
+    SetWindowState(#MainWindow, #PB_Window_Minimize)
   EndIf
 
   ; Автоматическое подключение к контроллеру при запуске
@@ -101,7 +134,7 @@ Procedure Main()
   DisconnectK3NG()
   CleanupDDEServer()
   SaveConfig()
-  ReleaseSingleInstance()
+  ;ReleaseSingleInstance()  ; Отключено вместе с single instance check
 
 EndProcedure
 
