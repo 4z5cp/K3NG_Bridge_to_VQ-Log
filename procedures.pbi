@@ -575,9 +575,14 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
         ElseIf Left(UCase(dataStr), 3) = "RE:"
           ; VQ-Log запрашивает элевацию - сохраняем значение и тип, затем отправляем обновление
           ; Ответ будет отправлен через элемент AZIMUTH в следующем ADVREQ
-          LastElevation = CurrentElevation
+          ; ВАЖНО: Сохраняем значение только если оно не равно 0 (чтобы не терять последнее валидное)
+          If CurrentElevation > 0
+            LastElevation = CurrentElevation
+            LogMsg("DDE: RE POKE request - current EL=" + Str(LastElevation))
+          Else
+            LogMsg("DDE: RE POKE request - EL=0, using last valid EL=" + Str(LastElevation))
+          EndIf
           LastRequestType = "RE"
-          LogMsg("DDE: RE POKE request - current EL=" + Str(LastElevation))
           If hszItemAz
             DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
