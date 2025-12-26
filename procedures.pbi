@@ -319,6 +319,11 @@ Procedure.s SendK3NGCommand(cmd.s)
 
   startTime = ElapsedMilliseconds()
   Repeat
+    ; Прерываем если приложение закрывается
+    If AppShuttingDown
+      Break
+    EndIf
+
     len = ReceiveNetworkData(TCPConnection, *buffer, 255)
     If len > 0
       tempStr = PeekS(*buffer, len, #PB_Ascii)
