@@ -530,14 +530,14 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           If LastRequestType = "RE"
             ; Был запрос элевации через RE: POKE
             If LastElevation = -1
-              dataStr = ""  ; Нет данных - отправляем пустую строку
+              dataStr = "RE:"  ; Нет данных - отправляем только префикс
             Else
               dataStr = "RE:" + Str(LastElevation)
             EndIf
           Else
             ; Был запрос азимута через RA: POKE или первый запрос
             If LastAzimuth = -1
-              dataStr = ""  ; Нет данных - отправляем пустую строку
+              dataStr = "RA:"  ; Нет данных - отправляем только префикс
             Else
               dataStr = "RA:" + Str(LastAzimuth)
             EndIf
@@ -548,8 +548,8 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
             PokeS(*buffer, dataStr, -1, #PB_Ascii)
             result = DdeCreateDataHandle(DDEInst, *buffer, bufLen, 0, hsz2, #CF_TEXT, 0)
             FreeMemory(*buffer)
-            ; Логируем только если есть данные (не пустая строка)
-            If dataStr <> ""
+            ; Логируем только если есть полные данные (не только префикс)
+            If dataStr <> "RA:" And dataStr <> "RE:"
               LogMsg("DDE: " + transType + " for AZIMUTH -> " + dataStr)
             EndIf
           EndIf
