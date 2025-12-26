@@ -100,7 +100,7 @@ Procedure Main()
   
   ; === Главный цикл событий ===
   Repeat
-    event = WaitWindowEvent()
+    event = WaitWindowEvent(10)  ; Таймаут 10мс для быстрой реакции на закрытие
     
     Select event
       Case #PB_Event_CloseWindow
