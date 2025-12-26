@@ -78,6 +78,9 @@ Procedure Main()
 
   LogMsg("DDE: Инициализация завершена, сервер готов к подключениям")
 
+  ; Запускаем таймер опроса ПОСЛЕ инициализации DDE сервера
+  AddWindowTimer(#MainWindow, #TimerPoll, Config\PollInterval)
+
   ; Минимизация окна при запуске, если опция включена
   If Config\StartMinimized
     SetWindowState(#MainWindow, #PB_Window_Minimize)

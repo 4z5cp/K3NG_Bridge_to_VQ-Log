@@ -80,8 +80,7 @@ Procedure CreateMainWindow()
   ; === Log Frame ===
   FrameGadget(#FrameLog, 10, 320, 400, 260, "Log")
   ListViewGadget(#ListLog, 20, 340, 380, 230)
-  
-  ; === Timer ===
-  AddWindowTimer(#MainWindow, #TimerPoll, Config\PollInterval)
-  
+
+  ; ВАЖНО: Таймер запускается в Main() после инициализации DDE сервера
+
 EndProcedure
