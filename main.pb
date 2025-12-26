@@ -78,6 +78,9 @@ Procedure Main()
 
   LogMsg("DDE: Инициализация завершена, сервер готов к подключениям")
 
+  ; Обновляем статус DDE сразу после инициализации
+  UpdateStatus()
+
   ; Запускаем таймер опроса ПОСЛЕ инициализации DDE сервера
   AddWindowTimer(#MainWindow, #TimerPoll, Config\PollInterval)
 
