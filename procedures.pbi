@@ -133,6 +133,11 @@ EndImport
 ; LOGGING
 ; ============================================================================
 Procedure LogMsg(msg.s)
+  ; Не логируем если приложение закрывается
+  If AppShuttingDown
+    ProcedureReturn
+  EndIf
+
   Protected timestamp.s = FormatDate("%hh:%ii:%ss", Date())
   If IsGadget(#ListLog)
     AddGadgetItem(#ListLog, -1, timestamp + " " + msg)
@@ -518,6 +523,11 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
   Protected *data, dataSize.l, dataStr.s
   Protected cmdValue.i
   Protected debugMsg.s
+
+  ; Быстро выходим если приложение закрывается
+  If AppShuttingDown
+    ProcedureReturn 0
+  EndIf
 
   ; Детальное логирование всех DDE транзакций для отладки
   debugMsg = "DDE Callback: type=$" + RSet(Hex(uType), 4, "0") + " fmt=$" + Hex(uFmt) + " hconv=$" + Hex(hconv)
