@@ -51,17 +51,17 @@ EndStructure
 ; === Global Variables ===
 Global Config.AppConfig
 Global DDEInst.l = 0
-Global hszService.l = 0      ; ARSVCOM (основной)
-Global hszService2.l = 0     ; ARSWIN (для совместимости)
-Global hszTopic.l = 0
-Global hszItemAz.l = 0       ; AZIMUTH item
-Global hszItemEl.l = 0       ; ELEVATION item
+Global hszService.l = 0          ; DDE string handle для ARSVCOM
+Global hszService2.l = 0         ; DDE string handle для ARSWIN
+Global hszTopic.l = 0            ; DDE string handle для RCI
+Global hszItemAz.l = 0           ; DDE string handle для AZIMUTH
+Global hszItemEl.l = 0           ; DDE string handle для ELEVATION
+Global DDEConversation.l = 0     ; Хэндл текущего DDE подключения
 Global TCPConnection.i = 0
 Global CurrentAzimuth.i = 0
 Global CurrentElevation.i = 0
 Global TargetAzimuth.i = -1
 Global Mutex.i = 0
-Global DDEConversation.l = 0     ; Хэндл server conversation (когда VQ-Log подключается к нам)
 
 ; === Procedure Declarations ===
 Declare LogMsg(msg.s)
@@ -561,11 +561,8 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RE:"
-          ; ПРОБЛЕМА ЭЛЕВАЦИИ: VQ-Log отправляет POKE "RE:" для запроса элевации,
-          ; но не принимает данные обратно стандартными методами DDE.
-          ; Попытка отправить через XTYP_ADVDATA - НЕ РАБОТАЕТ (ошибка 16390 DMLERR_NOTPROCESSED)
-          ; потому что VQ-Log не установил ADVISE loop для ELEVATION.
-          ; TODO: Ожидаем ответа от разработчика VQ-Log о правильном способе передачи элевации
+          ; РЕШЕНИЕ НАЙДЕНО! VQ-Log ожидает элевацию через POKE обратно в элемент AZIMUTH!
+          ; (Как в коде Qt: DDE_VQLog.poke("ARSVCOM","RCI","AZIMUTH","RE:05"))
           LogMsg("DDE: RE POKE request - current EL=" + Str(CurrentElevation))
           Protected elResponse.s, *elBuf, elBufLen.i, hElData.l, dwResult.l
           elResponse = "RE:" + RSet(Str(CurrentElevation), 2, "0")
@@ -573,13 +570,14 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           *elBuf = AllocateMemory(elBufLen)
           If *elBuf
             PokeS(*elBuf, elResponse, -1, #PB_Ascii)
-            hElData = DdeCreateDataHandle(DDEInst, *elBuf, elBufLen, 0, hszItemEl, #CF_TEXT, 0)
+            ; ВАЖНО: Отправляем в элемент AZIMUTH, а не ELEVATION!
+            hElData = DdeCreateDataHandle(DDEInst, *elBuf, elBufLen, 0, hszItemAz, #CF_TEXT, 0)
             If hElData
-              ; Пробуем отправить unsolicited data через ADVDATA (НЕ РАБОТАЕТ!)
-              If DdeClientTransaction(hElData, -1, hconv, hszItemEl, #CF_TEXT, #XTYP_ADVDATA, 1000, @dwResult)
-                LogMsg("DDE: Sent ADVDATA for RE: " + elResponse)
+              ; Отправляем POKE обратно в элемент AZIMUTH с данными "RE:05"
+              If DdeClientTransaction(hElData, -1, hconv, hszItemAz, #CF_TEXT, #XTYP_POKE, 1000, @dwResult)
+                LogMsg("DDE: Sent POKE to AZIMUTH with RE: " + elResponse)
               Else
-                LogMsg("DDE: ADVDATA failed for RE (error=" + Str(DdeGetLastError(DDEInst)) + ")")
+                LogMsg("DDE: POKE to AZIMUTH failed for RE (error=" + Str(DdeGetLastError(DDEInst)) + ")")
               EndIf
               DdeFreeDataHandle(hElData)
             EndIf
