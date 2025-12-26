@@ -351,8 +351,10 @@ Procedure PollK3NGPosition()
   ; Но только если прошло достаточно времени с последней попытки
   If Not TCPConnection And Config\Mode <> #MODE_LOG_TO_CONTROLLER
     Protected currentTime.i = ElapsedMilliseconds()
+    Protected timeSinceLastAttempt.i = currentTime - LastConnectionAttempt
     ; Проверяем что прошло минимум RECONNECT_DELAY миллисекунд
-    If currentTime - LastConnectionAttempt >= #RECONNECT_DELAY
+    If timeSinceLastAttempt >= #RECONNECT_DELAY
+      LogMsg("Attempting reconnection... (waited " + Str(timeSinceLastAttempt) + "ms)")
       LastConnectionAttempt = currentTime
       Config\K3ngIP = GetGadgetText(#StringIP)
       Config\K3ngPort = Val(GetGadgetText(#StringPort))
@@ -421,7 +423,8 @@ Procedure PollK3NGPosition()
     ; Контроллер не ответил - отключаем и будем пытаться переподключиться
     If TCPConnection
       DisconnectK3NG()
-      LogMsg("Connection lost - will try to reconnect")
+      LastConnectionAttempt = ElapsedMilliseconds()  ; Запоминаем время потери связи
+      LogMsg("Connection lost - will try to reconnect in 3 seconds")
     EndIf
     ; Устанавливаем -1 (нет данных)
     If CurrentAzimuth <> -1 Or CurrentElevation <> -1
