@@ -573,18 +573,18 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RE:"
-          ; VQ-Log запрашивает элевацию - сохраняем значение и тип, затем отправляем обновление
-          ; Ответ будет отправлен через элемент AZIMUTH в следующем ADVREQ
-          ; ВАЖНО: Сохраняем значение только если оно не равно 0 (чтобы не терять последнее валидное)
+          ; VQ-Log запрашивает элевацию
+          ; ВАЖНО: Отправляем обновление ТОЛЬКО если CurrentElevation > 0
+          ; Если элевация = 0 (контроллер не подключен), не отвечаем
           If CurrentElevation > 0
             LastElevation = CurrentElevation
-            LogMsg("DDE: RE POKE request - current EL=" + Str(LastElevation))
+            LastRequestType = "RE"
+            LogMsg("DDE: RE POKE request - sending EL=" + Str(LastElevation))
+            If hszItemAz
+              DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+            EndIf
           Else
-            LogMsg("DDE: RE POKE request - EL=0, using last valid EL=" + Str(LastElevation))
-          EndIf
-          LastRequestType = "RE"
-          If hszItemAz
-            DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+            LogMsg("DDE: RE POKE request - EL=0, ignoring (controller disconnected)")
           EndIf
           result = #DDE_FACK
         Else
