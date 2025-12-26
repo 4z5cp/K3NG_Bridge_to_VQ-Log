@@ -80,6 +80,7 @@ Global CurrentAzimuth.i = -1     ; Текущий азимут (-1 = нет да
 Global CurrentElevation.i = -1   ; Текущая элевация (-1 = нет данных)
 Global TargetAzimuth.i = -1
 Global Mutex.i = 0
+Global AppShuttingDown.i = #False ; Флаг выхода из приложения
 
 ; === Procedure Declarations ===
 Declare LogMsg(msg.s)
@@ -339,6 +340,11 @@ EndProcedure
 Procedure PollK3NGPosition()
   Protected response.s, azPos.i, elPos.i
   Protected dataReceived.i = #False
+
+  ; Быстро выходим если приложение закрывается
+  If AppShuttingDown
+    ProcedureReturn
+  EndIf
 
   ; Пытаемся автоматически переподключиться если связь потеряна
   If Not TCPConnection And Config\Mode <> #MODE_LOG_TO_CONTROLLER

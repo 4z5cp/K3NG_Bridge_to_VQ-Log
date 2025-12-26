@@ -98,8 +98,10 @@ Procedure Main()
     
     Select event
       Case #PB_Event_CloseWindow
+        AppShuttingDown = #True  ; Устанавливаем флаг для быстрого выхода
+        RemoveWindowTimer(#MainWindow, #TimerPoll)  ; Останавливаем таймер немедленно
         quit = #True
-        
+
       Case #PB_Event_Timer
         If EventTimer() = #TimerPoll
           HandleTimer()
