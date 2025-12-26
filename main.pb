@@ -86,6 +86,9 @@ Procedure Main()
   ; Автоматическое подключение к контроллеру при запуске
   If ConnectToK3NG()
     SetGadgetText(#ButtonConnect, "Disconnect")
+    ; Делаем первый опрос контроллера сразу после подключения
+    ; чтобы LastAzimuth и LastElevation были инициализированы
+    PollK3NGPosition()
   EndIf
 
   UpdateStatus()
