@@ -500,11 +500,11 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           ; Используем сохраненные значения LastAzimuth/LastElevation чтобы избежать
           ; проблем с асинхронным обновлением CurrentAzimuth/CurrentElevation
           If LastRequestType = "RE"
-            ; Был запрос элевации через RE: POKE
-            dataStr = "RE:" + RSet(Str(LastElevation), 2, "0")
+            ; Был запрос элевации через RE: POKE - отправляем значение как есть без форматирования
+            dataStr = "RE:" + Str(LastElevation)
           Else
-            ; Был запрос азимута через RA: POKE или первый запрос
-            dataStr = "RA:" + RSet(Str(LastAzimuth), 3, "0")
+            ; Был запрос азимута через RA: POKE или первый запрос - отправляем значение как есть
+            dataStr = "RA:" + Str(LastAzimuth)
           EndIf
           bufLen = Len(dataStr) + 1
           *buffer = AllocateMemory(bufLen)
@@ -573,18 +573,12 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RE:"
-          ; VQ-Log запрашивает элевацию
-          ; ВАЖНО: Отправляем обновление ТОЛЬКО если CurrentElevation > 0
-          ; Если элевация = 0 (контроллер не подключен), не отвечаем
-          If CurrentElevation > 0
-            LastElevation = CurrentElevation
-            LastRequestType = "RE"
-            LogMsg("DDE: RE POKE request - sending EL=" + Str(LastElevation))
-            If hszItemAz
-              DdePostAdvise(DDEInst, hszTopic, hszItemAz)
-            EndIf
-          Else
-            LogMsg("DDE: RE POKE request - EL=0, ignoring (controller disconnected)")
+          ; VQ-Log запрашивает элевацию - отправляем текущее значение как есть
+          LastElevation = CurrentElevation
+          LastRequestType = "RE"
+          LogMsg("DDE: RE POKE request - sending EL=" + Str(LastElevation))
+          If hszItemAz
+            DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
           result = #DDE_FACK
         Else
