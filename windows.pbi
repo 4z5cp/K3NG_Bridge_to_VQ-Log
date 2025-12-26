@@ -23,22 +23,20 @@ Procedure CreateMainWindow()
   OpenWindow(#MainWindow, x, y, #MAIN_WINDOW_WIDTH, #MAIN_WINDOW_HEIGHT, #APP_NAME, flags)
   
   ; === Connection Frame ===
-  FrameGadget(#FrameConnection, 10, 10, 400, 100, "K3NG Connection")
-  
+  FrameGadget(#FrameConnection, 10, 10, 400, 100, "K3NG Connection (Auto-reconnect)")
+
   TextGadget(#LabelIP, 20, 35, 80, 20, "IP Address:")
   StringGadget(#StringIP, 100, 32, 120, 24, Config\K3ngIP)
-  
+
   TextGadget(#LabelPort, 230, 35, 40, 20, "Port:")
   StringGadget(#StringPort, 275, 32, 60, 24, Str(Config\K3ngPort), #PB_String_Numeric)
-  
+
   TextGadget(#LabelMode, 20, 68, 80, 20, "Mode:")
-  ComboBoxGadget(#ComboMode, 100, 65, 180, 24)
+  ComboBoxGadget(#ComboMode, 100, 65, 235, 24)
   AddGadgetItem(#ComboMode, #MODE_CONTROLLER_TO_LOG, "Controller -> Log")
   AddGadgetItem(#ComboMode, #MODE_LOG_TO_CONTROLLER, "Log -> Controller")
   AddGadgetItem(#ComboMode, #MODE_BIDIRECTIONAL, "Bidirectional")
   SetGadgetState(#ComboMode, Config\Mode)
-  
-  ButtonGadget(#ButtonConnect, 300, 62, 100, 30, "Connect")
   
   ; === Status Frame ===
   FrameGadget(#FrameStatus, 10, 115, 400, 80, "Status")

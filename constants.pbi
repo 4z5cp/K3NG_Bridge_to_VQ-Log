@@ -94,6 +94,8 @@ CompilerEndIf
 #DEFAULT_PORT = 23
 #DEFAULT_MODE = 2
 #DEFAULT_POLL_INTERVAL = 1000
+#MIN_POLL_INTERVAL = 1000     ; Минимум 1 секунда
+#MAX_POLL_INTERVAL = 10000    ; Максимум 10 секунд
 #CONNECT_TIMEOUT = 5000
 
 ; === Mode Constants ===
@@ -116,8 +118,7 @@ Enumeration Gadgets
   #StringPort
   #LabelMode
   #ComboMode
-  #ButtonConnect
-  
+
   ; Status frame
   #FrameStatus
   #LabelAzText

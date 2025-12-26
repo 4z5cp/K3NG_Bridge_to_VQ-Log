@@ -73,11 +73,11 @@ Global hszItemAz.l = 0           ; DDE string handle для AZIMUTH
 Global hszItemEl.l = 0           ; DDE string handle для ELEVATION
 Global DDEConversation.l = 0     ; Хэндл входящего DDE подключения от VQ-Log (сервер)
 Global LastRequestType.s = ""   ; Последний тип запроса: "RA" или "RE"
-Global LastAzimuth.i = 0         ; Последнее значение азимута для DDE
-Global LastElevation.i = 0       ; Последнее значение элевации для DDE
+Global LastAzimuth.i = -1        ; Последнее значение азимута для DDE (-1 = нет данных)
+Global LastElevation.i = -1      ; Последнее значение элевации для DDE (-1 = нет данных)
 Global TCPConnection.i = 0
-Global CurrentAzimuth.i = 0
-Global CurrentElevation.i = 0
+Global CurrentAzimuth.i = -1     ; Текущий азимут (-1 = нет данных)
+Global CurrentElevation.i = -1   ; Текущая элевация (-1 = нет данных)
 Global TargetAzimuth.i = -1
 Global Mutex.i = 0
 
@@ -97,7 +97,6 @@ Declare StopRotation()
 Declare.i InitDDEServer()
 Declare CleanupDDEServer()
 Declare UpdateStatus()
-Declare HandleConnectButton()
 Declare HandleModeChange()
 Declare HandleGoButton()
 Declare HandleStopButton()
@@ -343,20 +342,30 @@ Procedure PollK3NGPosition()
   Protected response.s, azPos.i, elPos.i
   Protected dataReceived.i = #False
 
+  ; Пытаемся автоматически переподключиться если связь потеряна
+  If Not TCPConnection And Config\Mode <> #MODE_LOG_TO_CONTROLLER
+    Config\K3ngIP = GetGadgetText(#StringIP)
+    Config\K3ngPort = Val(GetGadgetText(#StringPort))
+    If ConnectToK3NG()
+      LogMsg("Auto-reconnected to K3NG controller")
+    EndIf
+  EndIf
+
   If Not TCPConnection Or Config\Mode = #MODE_LOG_TO_CONTROLLER
-    ; Контроллер не подключен - сбрасываем значения в 0
-    If CurrentAzimuth <> 0 Or CurrentElevation <> 0
-      CurrentAzimuth = 0
-      CurrentElevation = 0
-      If DDEInst And hszTopic
-        If hszItemAz
-          DdePostAdvise(DDEInst, hszTopic, hszItemAz)
-          LogMsg("DDE: Posted AZ update = 0 (controller disconnected)")
-        EndIf
-        If hszItemEl
-          DdePostAdvise(DDEInst, hszTopic, hszItemEl)
-          LogMsg("DDE: Posted EL update = 0 (controller disconnected)")
-        EndIf
+    ; Контроллер не подключен - устанавливаем -1 (нет данных)
+    If CurrentAzimuth <> -1 Or CurrentElevation <> -1
+      CurrentAzimuth = -1
+      CurrentElevation = -1
+      LastAzimuth = -1
+      LastElevation = -1
+      ; Отправляем уведомление в VQ-Log для обоих значений
+      If DDEInst And hszItemAz
+        LastRequestType = "RA"
+        DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+        LogMsg("DDE: PostAdvise AZIMUTH -> (no data)")
+        LastRequestType = "RE"
+        DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+        LogMsg("DDE: PostAdvise ELEVATION -> (no data)")
       EndIf
     EndIf
     ProcedureReturn
@@ -398,19 +407,25 @@ Procedure PollK3NGPosition()
       EndIf
     EndIf
   Else
-    ; Контроллер не ответил - сбрасываем в 0
-    If CurrentAzimuth <> 0 Or CurrentElevation <> 0
-      CurrentAzimuth = 0
-      CurrentElevation = 0
-      If DDEInst And hszTopic
-        If hszItemAz
-          DdePostAdvise(DDEInst, hszTopic, hszItemAz)
-          LogMsg("DDE: Posted AZ update = 0 (no response)")
-        EndIf
-        If hszItemEl
-          DdePostAdvise(DDEInst, hszTopic, hszItemEl)
-          LogMsg("DDE: Posted EL update = 0 (no response)")
-        EndIf
+    ; Контроллер не ответил - отключаем и будем пытаться переподключиться
+    If TCPConnection
+      DisconnectK3NG()
+      LogMsg("Connection lost - will try to reconnect")
+    EndIf
+    ; Устанавливаем -1 (нет данных)
+    If CurrentAzimuth <> -1 Or CurrentElevation <> -1
+      CurrentAzimuth = -1
+      CurrentElevation = -1
+      LastAzimuth = -1
+      LastElevation = -1
+      ; Отправляем уведомление в VQ-Log для обоих значений
+      If DDEInst And hszItemAz
+        LastRequestType = "RA"
+        DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+        LogMsg("DDE: PostAdvise AZIMUTH -> (no data)")
+        LastRequestType = "RE"
+        DdePostAdvise(DDEInst, hszTopic, hszItemAz)
+        LogMsg("DDE: PostAdvise ELEVATION -> (no data)")
       EndIf
     EndIf
   EndIf
@@ -515,11 +530,19 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           ; Используем сохраненные значения LastAzimuth/LastElevation чтобы избежать
           ; проблем с асинхронным обновлением CurrentAzimuth/CurrentElevation
           If LastRequestType = "RE"
-            ; Был запрос элевации через RE: POKE - отправляем значение как есть без форматирования
-            dataStr = "RE:" + Str(LastElevation)
+            ; Был запрос элевации через RE: POKE
+            If LastElevation = -1
+              dataStr = ""  ; Нет данных - отправляем пустую строку
+            Else
+              dataStr = "RE:" + Str(LastElevation)
+            EndIf
           Else
-            ; Был запрос азимута через RA: POKE или первый запрос - отправляем значение как есть
-            dataStr = "RA:" + Str(LastAzimuth)
+            ; Был запрос азимута через RA: POKE или первый запрос
+            If LastAzimuth = -1
+              dataStr = ""  ; Нет данных - отправляем пустую строку
+            Else
+              dataStr = "RA:" + Str(LastAzimuth)
+            EndIf
           EndIf
           bufLen = Len(dataStr) + 1
           *buffer = AllocateMemory(bufLen)
@@ -527,7 +550,11 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
             PokeS(*buffer, dataStr, -1, #PB_Ascii)
             result = DdeCreateDataHandle(DDEInst, *buffer, bufLen, 0, hsz2, #CF_TEXT, 0)
             FreeMemory(*buffer)
-            LogMsg("DDE: " + transType + " for AZIMUTH -> " + dataStr)
+            If dataStr = ""
+              LogMsg("DDE: " + transType + " for AZIMUTH -> (empty)")
+            Else
+              LogMsg("DDE: " + transType + " for AZIMUTH -> " + dataStr)
+            EndIf
           EndIf
         ElseIf hsz2 = hszItemEl
           ; ЭЛЕВАЦИЯ: VQ-Log никогда не запрашивает этот элемент через REQUEST/ADVREQ
@@ -694,23 +721,6 @@ EndProcedure
 ; ============================================================================
 ; EVENT HANDLERS
 ; ============================================================================
-Procedure HandleConnectButton()
-  Config\K3ngIP = GetGadgetText(#StringIP)
-  Config\K3ngPort = Val(GetGadgetText(#StringPort))
-  Config\Mode = GetGadgetState(#ComboMode)
-  SaveConfig()
-  
-  If Config\Connected
-    DisconnectK3NG()
-    SetGadgetText(#ButtonConnect, "Connect")
-  Else
-    If ConnectToK3NG()
-      SetGadgetText(#ButtonConnect, "Disconnect")
-    EndIf
-  EndIf
-  UpdateStatus()
-EndProcedure
-
 Procedure HandleModeChange()
   Config\Mode = GetGadgetState(#ComboMode)
   SaveConfig()
@@ -732,13 +742,13 @@ Procedure HandleApplyInterval()
 
   newInterval = Val(GetGadgetText(#StringPollInterval))
 
-  ; Check range: minimum 100 ms, maximum 10000 ms (10 sec)
-  If newInterval < 100
-    newInterval = 100
-    SetGadgetText(#StringPollInterval, "100")
-  ElseIf newInterval > 10000
-    newInterval = 10000
-    SetGadgetText(#StringPollInterval, "10000")
+  ; Check range: minimum 1000 ms (1 sec), maximum 10000 ms (10 sec)
+  If newInterval < #MIN_POLL_INTERVAL
+    newInterval = #MIN_POLL_INTERVAL
+    SetGadgetText(#StringPollInterval, Str(#MIN_POLL_INTERVAL))
+  ElseIf newInterval > #MAX_POLL_INTERVAL
+    newInterval = #MAX_POLL_INTERVAL
+    SetGadgetText(#StringPollInterval, Str(#MAX_POLL_INTERVAL))
   EndIf
 
   ; Apply new interval
@@ -816,8 +826,18 @@ EndProcedure
 ; GUI UPDATE
 ; ============================================================================
 Procedure UpdateStatus()
-  SetGadgetText(#LabelAzValue, Str(CurrentAzimuth) + "°")
-  SetGadgetText(#LabelElValue, Str(CurrentElevation) + "°")
+  ; Показываем пустое значение если контроллер не отвечает
+  If CurrentAzimuth = -1
+    SetGadgetText(#LabelAzValue, "---")
+  Else
+    SetGadgetText(#LabelAzValue, Str(CurrentAzimuth) + "°")
+  EndIf
+
+  If CurrentElevation = -1
+    SetGadgetText(#LabelElValue, "---")
+  Else
+    SetGadgetText(#LabelElValue, Str(CurrentElevation) + "°")
+  EndIf
   
   If Config\Connected
     SetGadgetText(#LabelTCPStatus, "TCP: Подключено")

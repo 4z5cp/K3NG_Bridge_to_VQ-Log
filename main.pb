@@ -85,7 +85,6 @@ Procedure Main()
 
   ; Автоматическое подключение к контроллеру при запуске
   If ConnectToK3NG()
-    SetGadgetText(#ButtonConnect, "Disconnect")
     ; Делаем первый опрос контроллера сразу после подключения
     ; чтобы LastAzimuth и LastElevation были инициализированы
     PollK3NGPosition()
@@ -108,11 +107,8 @@ Procedure Main()
         
       Case #PB_Event_Gadget
         gadget = EventGadget()
-        
-        Select gadget
-          Case #ButtonConnect
-            HandleConnectButton()
 
+        Select gadget
           Case #ComboMode
             HandleModeChange()
 
