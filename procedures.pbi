@@ -57,6 +57,7 @@ Global hszTopic.l = 0            ; DDE string handle для RCI
 Global hszItemAz.l = 0           ; DDE string handle для AZIMUTH
 Global hszItemEl.l = 0           ; DDE string handle для ELEVATION
 Global DDEConversation.l = 0     ; Хэндл текущего DDE подключения
+Global LastRequestType.s = ""   ; Последний тип запроса: "RA" или "RE"
 Global TCPConnection.i = 0
 Global CurrentAzimuth.i = 0
 Global CurrentElevation.i = 0
@@ -492,10 +493,15 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
       If uFmt = #CF_TEXT
         Protected *buffer, bufLen.i
         If hsz2 = hszItemAz
-          ; АЗИМУТ: Возвращаем оба значения в одной строке как попытка решения
-          ; проблемы с элевацией (VQ-Log может парсить строку целиком)
-          ; TODO: После получения ответа от разработчика VQ-Log, возможно потребуется изменить
-          dataStr = "RA:" + RSet(Str(CurrentAzimuth), 3, "0") + " RE:" + RSet(Str(CurrentElevation), 2, "0")
+          ; AZIMUTH элемент используется для передачи и азимута и элевации
+          ; Определяем что отправить по последнему POKE запросу (RA или RE)
+          If LastRequestType = "RE"
+            ; Был запрос элевации через RE: POKE
+            dataStr = "RE:" + RSet(Str(CurrentElevation), 2, "0")
+          Else
+            ; Был запрос азимута через RA: POKE или первый запрос
+            dataStr = "RA:" + RSet(Str(CurrentAzimuth), 3, "0")
+          EndIf
           bufLen = Len(dataStr) + 1
           *buffer = AllocateMemory(bufLen)
           If *buffer
@@ -554,16 +560,18 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RA:"
-          ; VQ-Log запрашивает азимут - отправляем обновление
+          ; VQ-Log запрашивает азимут - сохраняем тип и отправляем обновление
           LogMsg("DDE: RA POKE request - current AZ=" + Str(CurrentAzimuth))
+          LastRequestType = "RA"
           If hszItemAz
             DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RE:"
-          ; VQ-Log запрашивает элевацию - отправляем обновление через PostAdvise
-          ; VQ-Log получит оба значения (RA и RE) в ответе на следующий ADVREQ для AZIMUTH
+          ; VQ-Log запрашивает элевацию - сохраняем тип и отправляем обновление
+          ; Ответ будет отправлен через элемент AZIMUTH в следующем ADVREQ
           LogMsg("DDE: RE POKE request - current EL=" + Str(CurrentElevation))
+          LastRequestType = "RE"
           If hszItemAz
             DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
