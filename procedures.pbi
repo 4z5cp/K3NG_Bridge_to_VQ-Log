@@ -357,6 +357,7 @@ Procedure PollK3NGPosition()
     If azPos >= 0 And azPos <= 360
       If CurrentAzimuth <> azPos
         CurrentAzimuth = azPos
+        LastAzimuth = azPos  ; Сохраняем для DDE
         ; Уведомляем VQ-Log об изменении азимута через ADVISE
         If DDEInst And hszTopic And hszItemAz
           DdePostAdvise(DDEInst, hszTopic, hszItemAz)
@@ -370,6 +371,7 @@ Procedure PollK3NGPosition()
       If elPos >= 0 And elPos <= 180
         If CurrentElevation <> elPos
           CurrentElevation = elPos
+          LastElevation = elPos  ; Сохраняем для DDE
           ; Уведомляем VQ-Log об изменении элевации через ADVISE
           If DDEInst And hszTopic And hszItemEl
             DdePostAdvise(DDEInst, hszTopic, hszItemEl)
@@ -564,19 +566,19 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RA:"
-          ; VQ-Log запрашивает азимут - сохраняем значение и тип, затем отправляем обновление
-          LastAzimuth = CurrentAzimuth
+          ; VQ-Log запрашивает азимут - устанавливаем тип запроса и отправляем обновление
+          ; LastAzimuth уже сохранен в PollK3NGPosition при получении данных от контроллера
           LastRequestType = "RA"
-          LogMsg("DDE: RA POKE request - current AZ=" + Str(LastAzimuth))
+          LogMsg("DDE: RA POKE request - will send AZ=" + Str(LastAzimuth))
           If hszItemAz
             DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
           result = #DDE_FACK
         ElseIf Left(UCase(dataStr), 3) = "RE:"
-          ; VQ-Log запрашивает элевацию - отправляем текущее значение как есть
-          LastElevation = CurrentElevation
+          ; VQ-Log запрашивает элевацию - устанавливаем тип запроса и отправляем обновление
+          ; LastElevation уже сохранен в PollK3NGPosition при получении данных от контроллера
           LastRequestType = "RE"
-          LogMsg("DDE: RE POKE request - sending EL=" + Str(LastElevation))
+          LogMsg("DDE: RE POKE request - will send EL=" + Str(LastElevation))
           If hszItemAz
             DdePostAdvise(DDEInst, hszTopic, hszItemAz)
           EndIf
