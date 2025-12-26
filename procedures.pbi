@@ -71,7 +71,8 @@ Global hszService.l = 0          ; DDE string handle для ARSVCOM
 Global hszTopic.l = 0            ; DDE string handle для RCI
 Global hszItemAz.l = 0           ; DDE string handle для AZIMUTH
 Global hszItemEl.l = 0           ; DDE string handle для ELEVATION
-Global DDEConversation.l = 0     ; Хэндл текущего DDE подключения
+Global DDEConversation.l = 0     ; Хэндл входящего DDE подключения от VQ-Log (сервер)
+Global VQLogClientConv.l = 0    ; Хэндл исходящего DDE подключения к VQ-Log (клиент)
 Global LastRequestType.s = ""   ; Последний тип запроса: "RA" или "RE"
 Global LastAzimuth.i = 0         ; Последнее значение азимута для DDE
 Global LastElevation.i = 0       ; Последнее значение элевации для DDE
@@ -95,6 +96,7 @@ Declare RotateToElevation(el.i)
 Declare RotateToPosition(az.i, el.i)
 Declare StopRotation()
 Declare.i InitDDEServer()
+Declare SendPokeToVQLog(data.s)
 Declare CleanupDDEServer()
 Declare UpdateStatus()
 Declare HandleConnectButton()
@@ -373,11 +375,8 @@ Procedure PollK3NGPosition()
       If CurrentAzimuth <> azPos
         CurrentAzimuth = azPos
         LastAzimuth = azPos  ; Сохраняем для DDE
-        ; Уведомляем VQ-Log об изменении азимута через ADVISE
-        If DDEInst And hszTopic And hszItemAz
-          DdePostAdvise(DDEInst, hszTopic, hszItemAz)
-          LogMsg("DDE: Posted AZ update = " + Str(CurrentAzimuth))
-        EndIf
+        ; Отправляем POKE в VQ-Log с новым значением азимута
+        SendPokeToVQLog("RA:" + Str(CurrentAzimuth))
       EndIf
     EndIf
 
@@ -387,13 +386,8 @@ Procedure PollK3NGPosition()
         If CurrentElevation <> elPos
           CurrentElevation = elPos
           LastElevation = elPos  ; Сохраняем для DDE
-          ; Уведомляем VQ-Log об изменении элевации
-          ; ВАЖНО: отправляем PostAdvise для AZIMUTH, а не ELEVATION!
-          ; VQ-Log устанавливает ADVISE loop только для AZIMUTH
-          If DDEInst And hszTopic And hszItemAz
-            DdePostAdvise(DDEInst, hszTopic, hszItemAz)
-            LogMsg("DDE: Posted EL update = " + Str(CurrentElevation))
-          EndIf
+          ; Отправляем POKE в VQ-Log с новым значением элевации
+          SendPokeToVQLog("RE:" + Str(CurrentElevation))
         EndIf
       EndIf
     EndIf
@@ -678,8 +672,36 @@ Procedure.i InitDDEServer()
   ProcedureReturn #True
 EndProcedure
 
-; Функции для подключения к VQ-Log как клиент удалены - не используются
-; Мы работаем только как DDE сервер
+; Отправка POKE в VQ-Log (мы работаем как клиент)
+Procedure SendPokeToVQLog(data.s)
+  Protected *buffer, bufLen.i, hData.l, dwResult.l
+
+  ; Подключаемся к VQ-Log если еще не подключены
+  If VQLogClientConv = 0 And DDEConversation <> 0
+    ; Используем DDEConversation который установил VQ-Log когда подключился к нам
+    VQLogClientConv = DDEConversation
+  EndIf
+
+  If VQLogClientConv = 0
+    ProcedureReturn  ; VQ-Log не подключен
+  EndIf
+
+  bufLen = Len(data) + 1
+  *buffer = AllocateMemory(bufLen)
+  If *buffer
+    PokeS(*buffer, data, -1, #PB_Ascii)
+    hData = DdeCreateDataHandle(DDEInst, *buffer, bufLen, 0, hszItemAz, #CF_TEXT, 0)
+    If hData
+      If DdeClientTransaction(hData, -1, VQLogClientConv, hszItemAz, #CF_TEXT, #XTYP_POKE, 1000, @dwResult)
+        LogMsg("DDE: Sent POKE to VQ-Log: " + data)
+      Else
+        LogMsg("DDE: POKE to VQ-Log failed (error=" + Str(DdeGetLastError(DDEInst)) + ")")
+      EndIf
+      DdeFreeDataHandle(hData)
+    EndIf
+    FreeMemory(*buffer)
+  EndIf
+EndProcedure
 
 Procedure CleanupDDEServer()
   If DDEInst
