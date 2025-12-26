@@ -96,7 +96,7 @@ CompilerEndIf
 #DEFAULT_POLL_INTERVAL = 1000
 #MIN_POLL_INTERVAL = 1000     ; Минимум 1 секунда
 #MAX_POLL_INTERVAL = 10000    ; Максимум 10 секунд
-#CONNECT_TIMEOUT = 5000
+#CONNECT_TIMEOUT = 2000        ; Таймаут подключения 2 секунды (для быстрого закрытия)
 #RECONNECT_DELAY = 3000        ; Задержка между попытками подключения (3 секунды)
 
 ; === Mode Constants ===

@@ -263,7 +263,7 @@ Procedure.i ConnectToK3NG()
 
   startTime = ElapsedMilliseconds()
   While IsThread(threadID) And (ElapsedMilliseconds() - startTime) < #CONNECT_TIMEOUT And Not AppShuttingDown
-    Delay(50)
+    Delay(10)  ; Короткая задержка для быстрой проверки AppShuttingDown
     While WindowEvent() : Wend
   Wend
 
@@ -356,11 +356,14 @@ Procedure PollK3NGPosition()
     Protected timeSinceLastAttempt.i = currentTime - LastConnectionAttempt
     ; Проверяем что прошло минимум RECONNECT_DELAY миллисекунд
     If timeSinceLastAttempt >= #RECONNECT_DELAY
-      LogMsg("Attempting reconnection... (waited " + Str(timeSinceLastAttempt) + "ms)")
-      Config\K3ngIP = GetGadgetText(#StringIP)
-      Config\K3ngPort = Val(GetGadgetText(#StringPort))
-      If ConnectToK3NG()
-        LogMsg("Auto-reconnected to K3NG controller")
+      ; Ещё раз проверяем что приложение не закрывается перед блокирующей операцией
+      If Not AppShuttingDown
+        LogMsg("Attempting reconnection... (waited " + Str(timeSinceLastAttempt) + "ms)")
+        Config\K3ngIP = GetGadgetText(#StringIP)
+        Config\K3ngPort = Val(GetGadgetText(#StringPort))
+        If ConnectToK3NG()
+          LogMsg("Auto-reconnected to K3NG controller")
+        EndIf
       EndIf
       ; Обновляем время ПОСЛЕ попытки, чтобы следующая попытка была через RECONNECT_DELAY
       LastConnectionAttempt = ElapsedMilliseconds()
