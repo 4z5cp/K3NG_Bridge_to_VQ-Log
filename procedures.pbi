@@ -81,6 +81,7 @@ Global CurrentElevation.i = -1   ; Текущая элевация (-1 = нет 
 Global TargetAzimuth.i = -1
 Global Mutex.i = 0
 Global AppShuttingDown.i = #False ; Флаг выхода из приложения
+Global LastConnectionAttempt.i = 0 ; Время последней попытки подключения (ms)
 
 ; === Procedure Declarations ===
 Declare LogMsg(msg.s)
@@ -347,11 +348,17 @@ Procedure PollK3NGPosition()
   EndIf
 
   ; Пытаемся автоматически переподключиться если связь потеряна
+  ; Но только если прошло достаточно времени с последней попытки
   If Not TCPConnection And Config\Mode <> #MODE_LOG_TO_CONTROLLER
-    Config\K3ngIP = GetGadgetText(#StringIP)
-    Config\K3ngPort = Val(GetGadgetText(#StringPort))
-    If ConnectToK3NG()
-      LogMsg("Auto-reconnected to K3NG controller")
+    Protected currentTime.i = ElapsedMilliseconds()
+    ; Проверяем что прошло минимум RECONNECT_DELAY миллисекунд
+    If currentTime - LastConnectionAttempt >= #RECONNECT_DELAY
+      LastConnectionAttempt = currentTime
+      Config\K3ngIP = GetGadgetText(#StringIP)
+      Config\K3ngPort = Val(GetGadgetText(#StringPort))
+      If ConnectToK3NG()
+        LogMsg("Auto-reconnected to K3NG controller")
+      EndIf
     EndIf
   EndIf
 
