@@ -357,12 +357,13 @@ Procedure PollK3NGPosition()
     ; Проверяем что прошло минимум RECONNECT_DELAY миллисекунд
     If timeSinceLastAttempt >= #RECONNECT_DELAY
       LogMsg("Attempting reconnection... (waited " + Str(timeSinceLastAttempt) + "ms)")
-      LastConnectionAttempt = currentTime
       Config\K3ngIP = GetGadgetText(#StringIP)
       Config\K3ngPort = Val(GetGadgetText(#StringPort))
       If ConnectToK3NG()
         LogMsg("Auto-reconnected to K3NG controller")
       EndIf
+      ; Обновляем время ПОСЛЕ попытки, чтобы следующая попытка была через RECONNECT_DELAY
+      LastConnectionAttempt = ElapsedMilliseconds()
     EndIf
   EndIf
 
@@ -794,6 +795,11 @@ Procedure HandleStartMinimizedToggle()
 EndProcedure
 
 Procedure HandleTimer()
+  ; Не выполняем опрос если приложение закрывается
+  If AppShuttingDown
+    ProcedureReturn
+  EndIf
+
   PollK3NGPosition()
   UpdateStatus()
 EndProcedure
