@@ -268,15 +268,13 @@ Procedure.i ConnectToK3NG()
   If IsThread(threadID)
     KillThread(threadID)
     Config\Connected = #False
-    LogMsg("TCP: Connection timeout")
-    ShowError("Error", "Connection timeout to " + Config\K3ngIP + #CRLF$ + "Host not responding.")
+    LogMsg("TCP: Connection timeout (will retry)")
     ProcedureReturn #False
   ElseIf Config\Connected
-    LogMsg("TCP: Connected")
+    LogMsg("TCP: Connected to " + Config\K3ngIP + ":" + Str(Config\K3ngPort))
     ProcedureReturn #True
   Else
-    LogMsg("TCP: Connection failed")
-    ShowError("Error", "Failed to connect to " + Config\K3ngIP + ":" + Str(Config\K3ngPort))
+    ; Тихо не удалось подключиться - попытаемся снова при следующем poll
     ProcedureReturn #False
   EndIf
 EndProcedure
@@ -550,9 +548,8 @@ ProcedureDLL.l DDECallback(uType.l, uFmt.l, hconv.l, hsz1.l, hsz2.l, hdata.l, dw
             PokeS(*buffer, dataStr, -1, #PB_Ascii)
             result = DdeCreateDataHandle(DDEInst, *buffer, bufLen, 0, hsz2, #CF_TEXT, 0)
             FreeMemory(*buffer)
-            If dataStr = ""
-              LogMsg("DDE: " + transType + " for AZIMUTH -> (empty)")
-            Else
+            ; Логируем только если есть данные (не пустая строка)
+            If dataStr <> ""
               LogMsg("DDE: " + transType + " for AZIMUTH -> " + dataStr)
             EndIf
           EndIf
@@ -738,29 +735,33 @@ Procedure HandleStopButton()
 EndProcedure
 
 Procedure HandleApplyInterval()
-  Protected newInterval.i
+  Protected newIntervalSec.i, newIntervalMs.i
 
-  newInterval = Val(GetGadgetText(#StringPollInterval))
+  ; Получаем значение в секундах и конвертируем в миллисекунды
+  newIntervalSec = Val(GetGadgetText(#StringPollInterval))
+  newIntervalMs = newIntervalSec * 1000
 
-  ; Check range: minimum 1000 ms (1 sec), maximum 10000 ms (10 sec)
-  If newInterval < #MIN_POLL_INTERVAL
-    newInterval = #MIN_POLL_INTERVAL
-    SetGadgetText(#StringPollInterval, Str(#MIN_POLL_INTERVAL))
-  ElseIf newInterval > #MAX_POLL_INTERVAL
-    newInterval = #MAX_POLL_INTERVAL
-    SetGadgetText(#StringPollInterval, Str(#MAX_POLL_INTERVAL))
+  ; Check range: minimum 1 sec, maximum 10 sec
+  If newIntervalSec < 1
+    newIntervalSec = 1
+    newIntervalMs = 1000
+    SetGadgetText(#StringPollInterval, "1")
+  ElseIf newIntervalSec > 10
+    newIntervalSec = 10
+    newIntervalMs = 10000
+    SetGadgetText(#StringPollInterval, "10")
   EndIf
 
   ; Apply new interval
-  If newInterval <> Config\PollInterval
-    Config\PollInterval = newInterval
+  If newIntervalMs <> Config\PollInterval
+    Config\PollInterval = newIntervalMs
     SaveConfig()
 
     ; Restart timer with new interval
     RemoveWindowTimer(#MainWindow, #TimerPoll)
     AddWindowTimer(#MainWindow, #TimerPoll, Config\PollInterval)
 
-    LogMsg("Poll interval set: " + Str(Config\PollInterval) + " ms")
+    LogMsg("Poll interval set: " + Str(newIntervalSec) + " sec (" + Str(Config\PollInterval) + " ms)")
   EndIf
 EndProcedure
 
